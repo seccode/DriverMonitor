@@ -3,6 +3,7 @@ import dlib
 import numpy as np
 from imutils import face_utils
 import argparse
+import playsound 
 
 parser = argparse.ArgumentParser(description="Pass video file")
 parser.add_argument("--video",dest="video",default="0",
@@ -66,7 +67,6 @@ class FaceDetector:
                                                         self.dist_coeffs)
         return rotation_vec, translation_vec
 
-
     def detect(self):
         if args.video == '0':
             args.video = 0
@@ -92,7 +92,7 @@ class FaceDetector:
         fps = 0
         while cap.isOpened():
             ret, frame = cap.read()
-            frame = cv2.resize(frame,(int(frame.shape[1]/3),int(frame.shape[0]/3)))
+            frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
             if ret:
                 face_rects = self.detector(frame, 0)
                 if len(face_rects) > 0:
@@ -100,7 +100,8 @@ class FaceDetector:
 
                     rotation_vec, translation_vec = self.get_head_pose(shape)
                     self.draw_annotation_box(frame,rotation_vec,translation_vec)
-
+                else:
+                    playsound.playsound('beep-07.mp3')
                 cv2.imshow("Frame", frame)
                 if cv2.waitKey(1) == 27:
                     break
