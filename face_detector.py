@@ -9,10 +9,10 @@ import time
 class FaceDetector:
     def __init__(self):
         self.dist_coeffs = np.zeros((4,1))
-        self.face_landmark_path = './shape_predictor_68_face_landmarks.dat'
+        self.face_landmark_path = '/home/clymer-hogan-inc/Desktop/DriverMonitor/shape_predictor_68_face_landmarks.dat'
         self.eyes_area = [] # Store area of eye feature
 
-    def get_full_model_points(self,filename='model.txt'):
+    def get_full_model_points(self,filename='/home/clymer-hogan-inc/Desktop/DriverMonitor/model.txt'):
             raw_value = []
             with open(filename) as file:
                 for line in file:
@@ -124,8 +124,10 @@ class FaceDetector:
 
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor(self.face_landmark_path)
-
+        
+        inattentive_start = None
         while cap.isOpened():
+            
             ret, frame = cap.read()
             # Resize frame for faster detection
             frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
@@ -135,6 +137,8 @@ class FaceDetector:
             # Detect heads in frame
             face_rects = self.detector(frame, 0)
             if len(face_rects) > 0: # Head detected
+          
+         
                 # Get head feature points from first detected head
                 shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
 
@@ -142,16 +146,24 @@ class FaceDetector:
                 rotation_vec, translation_vec = self.get_head_pose(shape)
                 if not self.eyes_open(shape): # Determine if eyes are closed
                     # If eyes closed, draw red annotation box and play alert sound
-                    self.draw_annotation_box(frame,shape,rotation_vec,translation_vec,color=(0,0,255))
-                    pygame.mixer.music.play(1,0.0)
-                    time.sleep(.02)
+                    if inattentive_start is None:
+                        inattentive_start = time.time()
+                    elif time.time() - inattentive_start >= .8:
+                        self.draw_annotation_box(frame,shape,rotation_vec,translation_vec,color=(0,0,255))
+                        pygame.mixer.music.play(1,0.0)
+                        time.sleep(.02)
                 else:
+                    if inattentive_start is not None:
+                        inattentive_start = None
                     # If eyes open, draw white annotation box
                     self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
             else: # No head detected
-                # Alert driver with sound
-                pygame.mixer.music.play(1,0.0)
-                time.sleep(.02)
+                # Alert driver with sound 
+                if inattentive_start is None:
+                    inattentive_start = time.time()
+                elif time.time() - inattentive_start >= .8:
+                    pygame.mixer.music.play(1,0.0)
+                    time.sleep(.02)
             cv2.imshow("Frame", frame)
             if cv2.waitKey(1) == 27:
                 break
@@ -160,7 +172,7 @@ if __name__ == '__main__':
     # Load alert sound
     pygame.init()
     pygame.mixer.init()
-    pygame.mixer.music.load('beep-07.mp3')
+    pygame.mixer.music.load('/home/clymer-hogan-inc/Desktop/DriverMonitor/beep-07.mp3')
 
     # Take video argument, default to webcam
     parser = argparse.ArgumentParser(description="Pass video file")
