@@ -81,14 +81,17 @@ class FaceDetector:
 
     def eyes_open(self,shape: np.array) -> bool:
         # Heuristic to determine if eyes are open based on a continuously
-        # calculated average eye area
+        # calculated average eye area controlled for head size (proxy for depth)
         eye_left = np.array([shape[36],shape[37],shape[38],
                             shape[39],shape[40],shape[41]])
         eye_right = np.array([shape[42],shape[43],shape[44],
                             shape[45],shape[46],shape[47]])
 
-        left_area = self.shoelace_formula(eye_left)
-        right_area = self.shoelace_formula(eye_right)
+        face_outline = np.array([shape[1],shape[9],shape[17]])
+        face_area = self.shoelace_formula(face_outline)
+
+        left_area = self.shoelace_formula(eye_left) / face_area
+        right_area = self.shoelace_formula(eye_right) / face_area
         self.eyes_area.append(left_area)
         self.eyes_area.append(right_area)
         if (left_area+right_area)/2 < (np.mean(self.eyes_area)/1.5):
