@@ -6,17 +6,6 @@ import argparse
 import pygame
 import time
 
-# Load alert sound
-pygame.init()
-pygame.mixer.init()
-pygame.mixer.music.load('beep-07.mp3')
-
-# Take video argument, default to webcam
-parser = argparse.ArgumentParser(description="Pass video file")
-parser.add_argument("--video",dest="video",default="0",
-                    help="Path to video file")
-args = parser.parse_args()
-
 class FaceDetector:
     def __init__(self):
         self.dist_coeffs = np.zeros((4,1))
@@ -119,11 +108,13 @@ class FaceDetector:
         cap = cv2.VideoCapture(args.video)
         assert cap.isOpened(), "Video {} not found".format(args.video)
 
+        # Find size of frame
         _, test_frame = cap.read()
         size = test_frame.shape
         self.focal_length = size[1]
         self.camera_center = (size[1] / 2, size[0] / 2)
 
+        # 68 facial feature points
         self.model_points_68 = self.get_full_model_points()
 
         self.camera_matrix = np.array(
@@ -166,4 +157,15 @@ class FaceDetector:
                 break
 
 if __name__ == '__main__':
+    # Load alert sound
+    pygame.init()
+    pygame.mixer.init()
+    pygame.mixer.music.load('beep-07.mp3')
+
+    # Take video argument, default to webcam
+    parser = argparse.ArgumentParser(description="Pass video file")
+    parser.add_argument("--video",dest="video",default="0",
+                        help="Path to video file")
+    args = parser.parse_args()
+
     FaceDetector().detect()
