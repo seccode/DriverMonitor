@@ -34,10 +34,12 @@ class FaceDetector:
             return model_points
 
     def draw_annotation_box(self, image: np.array,
+                                shape: np.array,
                                 rotation_vector: np.array,
                                 translation_vector: np.array,
                                 color=(255, 255, 255),
                                 line_width=2):
+            # Draw 3D box on frame in front of head
             point_3d = []
             rear_size = 75
             rear_depth = 0
@@ -46,7 +48,6 @@ class FaceDetector:
             point_3d.append((rear_size, rear_size, rear_depth))
             point_3d.append((rear_size, -rear_size, rear_depth))
             point_3d.append((-rear_size, -rear_size, rear_depth))
-
             front_size = 120
             front_depth = 100
             point_3d.append((-front_size, -front_size, front_depth))
@@ -56,6 +57,7 @@ class FaceDetector:
             point_3d.append((-front_size, -front_size, front_depth))
             point_3d = np.array(point_3d, dtype=np.float).reshape(-1, 3)
 
+            # Project 3D points onto 2D frame
             (point_2d, _) = cv2.projectPoints(point_3d,
                                               rotation_vector,
                                               translation_vector,
@@ -63,6 +65,7 @@ class FaceDetector:
                                               self.dist_coeffs)
             point_2d = np.int32(point_2d.reshape(-1, 2))
 
+            # Add lines to frame
             cv2.polylines(image, [point_2d], True, color, line_width, cv2.LINE_AA)
             cv2.line(image, tuple(point_2d[1]), tuple(
                 point_2d[6]), color, line_width, cv2.LINE_AA)
@@ -71,7 +74,15 @@ class FaceDetector:
             cv2.line(image, tuple(point_2d[3]), tuple(
                 point_2d[8]), color, line_width, cv2.LINE_AA)
 
+            # Add feature points to head
+            for i, item in enumerate(shape):
+                if i >= 36 and i <= 47: # Eye feature points
+                    cv2.circle(image,tuple(item),1,(0,255,0),-1)
+                else:
+                    cv2.circle(image,tuple(item),1,(255,0,0),-1)
+
     def get_head_pose(self,shape: np.array) -> tuple:
+        # Find rotational and translational vectors of head position
         image_pts = np.float32([shape])
         _, rotation_vec, translation_vec = cv2.solvePnP(self.model_points_68,
                                                         image_pts,
@@ -80,10 +91,8 @@ class FaceDetector:
         return (rotation_vec, translation_vec)
 
     def eyes_open(self,shape: np.array) -> bool:
-        '''
-        Heuristic to determine if eyes are open based on a continuously
-        calculated average eye area
-        '''
+        # Heuristic to determine if eyes are open based on a continuously
+        # calculated average eye area
         eye_left = np.array([shape[36],shape[37],shape[38],
                             shape[39],shape[40],shape[41]])
         eye_right = np.array([shape[42],shape[43],shape[44],
@@ -98,25 +107,25 @@ class FaceDetector:
         return True
 
     def shoelace_formula(self,points: np.array) -> float:
-        '''Determine area of polygon from points'''
+        # Determine area of polygon from points
         x = points[:,0]
         y = points[:,1]
         return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
 
     def detect(self):
+        # Read from video and detect head position
         if args.video == '0':
             args.video = 0
         cap = cv2.VideoCapture(args.video)
         assert cap.isOpened(), "Video {} not found".format(args.video)
 
         _, test_frame = cap.read()
-
         size = test_frame.shape
+        self.focal_length = size[1]
+        self.camera_center = (size[1] / 2, size[0] / 2)
 
         self.model_points_68 = self.get_full_model_points()
 
-        self.focal_length = size[1]
-        self.camera_center = (size[1] / 2, size[0] / 2)
         self.camera_matrix = np.array(
             [[self.focal_length, 0, self.camera_center[0]],
              [0, self.focal_length, self.camera_center[1]],
@@ -127,30 +136,34 @@ class FaceDetector:
 
         while cap.isOpened():
             ret, frame = cap.read()
+            # Resize frame for faster detection
             frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
-            if ret:
-                face_rects = self.detector(frame, 0)
-                if len(face_rects) > 0:
-                    shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
-                    for i, item in enumerate(shape):
-                        if i >= 36 and i <= 47:
-                            cv2.circle(frame,tuple(item),1,(0,255,0),-1)
-                        else:
-                            cv2.circle(frame,tuple(item),1,(255,0,0),-1)
+            if not ret:
+                break
 
-                    rotation_vec, translation_vec = self.get_head_pose(shape)
-                    if not self.eyes_open(shape):
-                        self.draw_annotation_box(frame,rotation_vec,translation_vec,color=(0,0,255))
-                        pygame.mixer.music.play(1,0.0)
-                        time.sleep(.02)
-                    else:
-                        self.draw_annotation_box(frame,rotation_vec,translation_vec)
-                else:
+            # Detect heads in frame
+            face_rects = self.detector(frame, 0)
+            if len(face_rects) > 0: # Head detected
+                # Get head feature points from first detected head
+                shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
+
+                # Find position of head
+                rotation_vec, translation_vec = self.get_head_pose(shape)
+                if not self.eyes_open(shape): # Determine if eyes are closed
+                    # If eyes closed, draw red annotation box and play alert sound
+                    self.draw_annotation_box(frame,shape,rotation_vec,translation_vec,color=(0,0,255))
                     pygame.mixer.music.play(1,0.0)
                     time.sleep(.02)
-                cv2.imshow("Frame", frame)
-                if cv2.waitKey(1) == 27:
-                    break
+                else:
+                    # If eyes open, draw white annotation box
+                    self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
+            else: # No head detected
+                # Alert driver with sound
+                pygame.mixer.music.play(1,0.0)
+                time.sleep(.02)
+            cv2.imshow("Frame", frame)
+            if cv2.waitKey(1) == 27:
+                break
 
 if __name__ == '__main__':
     FaceDetector().detect()
