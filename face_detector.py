@@ -154,7 +154,7 @@ class FaceDetector:
                     elif time.time() - inattentive_start >= .8:
                         self.draw_annotation_box(frame,shape,rotation_vec,translation_vec,color=(0,0,255))
                         pygame.mixer.music.play(1,0.0)
-                        time.sleep(.02)
+                        time.sleep(.025)
                 else:
                     if inattentive_start is not None:
                         inattentive_start = None
@@ -166,8 +166,9 @@ class FaceDetector:
                     inattentive_start = time.time()
                 elif time.time() - inattentive_start >= .8:
                     pygame.mixer.music.play(1,0.0)
-                    time.sleep(.02)
-            cv2.imshow("Frame", frame)
+                    time.sleep(.025)
+            if args.show == 1:
+                cv2.imshow("Frame", frame)
             if cv2.waitKey(1) == 27:
                 break
 
@@ -181,6 +182,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Pass video file")
     parser.add_argument("--video",dest="video",default="0",
                         help="Path to video file")
+    parser.add_argument("--show",dest="show",default=1,
+                        help="1 to show frame, 0 to not show frame")
     args = parser.parse_args()
 
     FaceDetector().detect()
