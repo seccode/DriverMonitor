@@ -6,10 +6,12 @@ import argparse
 import pygame
 import time
 
+# Load alert sound
 pygame.init()
 pygame.mixer.init()
 pygame.mixer.music.load('beep-07.mp3')
 
+# Take video argument, default to webcam
 parser = argparse.ArgumentParser(description="Pass video file")
 parser.add_argument("--video",dest="video",default="0",
                     help="Path to video file")
@@ -19,20 +21,23 @@ class FaceDetector:
     def __init__(self):
         self.dist_coeffs = np.zeros((4,1))
         self.face_landmark_path = './shape_predictor_68_face_landmarks.dat'
-        self.eyes_area = []
+        self.eyes_area = [] # Store area of eye feature
 
-    def _get_full_model_points(self,filename='assets/model.txt'):
+    def get_full_model_points(self,filename='model.txt'):
             raw_value = []
             with open(filename) as file:
                 for line in file:
                     raw_value.append(line)
             model_points = np.array(raw_value, dtype=np.float32)
             model_points = np.reshape(model_points, (3, -1)).T
-
             model_points[:, 2] *= -1
             return model_points
 
-    def draw_annotation_box(self, image, rotation_vector, translation_vector, color=(255, 255, 255), line_width=2):
+    def draw_annotation_box(self, image: np.array,
+                                rotation_vector: np.array,
+                                translation_vector: np.array,
+                                color=(255, 255, 255),
+                                line_width=2):
             point_3d = []
             rear_size = 75
             rear_depth = 0
@@ -66,15 +71,15 @@ class FaceDetector:
             cv2.line(image, tuple(point_2d[3]), tuple(
                 point_2d[8]), color, line_width, cv2.LINE_AA)
 
-    def get_head_pose(self,shape):
+    def get_head_pose(self,shape: np.array) -> tuple:
         image_pts = np.float32([shape])
         _, rotation_vec, translation_vec = cv2.solvePnP(self.model_points_68,
                                                         image_pts,
                                                         self.camera_matrix,
                                                         self.dist_coeffs)
-        return rotation_vec, translation_vec
+        return (rotation_vec, translation_vec)
 
-    def eyes_open(self,shape):
+    def eyes_open(self,shape: np.array) -> bool:
         '''
         Heuristic to determine if eyes are open based on a continuously
         calculated average eye area
@@ -92,12 +97,11 @@ class FaceDetector:
             return False
         return True
 
-    def shoelace_formula(self,points):
+    def shoelace_formula(self,points: np.array) -> float:
         '''Determine area of polygon from points'''
         x = points[:,0]
         y = points[:,1]
         return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
-
 
     def detect(self):
         if args.video == '0':
@@ -109,7 +113,7 @@ class FaceDetector:
 
         size = test_frame.shape
 
-        self.model_points_68 = self._get_full_model_points()
+        self.model_points_68 = self.get_full_model_points()
 
         self.focal_length = size[1]
         self.camera_center = (size[1] / 2, size[0] / 2)
@@ -128,7 +132,6 @@ class FaceDetector:
                 face_rects = self.detector(frame, 0)
                 if len(face_rects) > 0:
                     shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
-                    print(self.eyes_open(shape))
                     for i, item in enumerate(shape):
                         if i >= 36 and i <= 47:
                             cv2.circle(frame,tuple(item),1,(0,255,0),-1)
@@ -136,7 +139,12 @@ class FaceDetector:
                             cv2.circle(frame,tuple(item),1,(255,0,0),-1)
 
                     rotation_vec, translation_vec = self.get_head_pose(shape)
-                    self.draw_annotation_box(frame,rotation_vec,translation_vec)
+                    if not self.eyes_open(shape):
+                        self.draw_annotation_box(frame,rotation_vec,translation_vec,color=(0,0,255))
+                        pygame.mixer.music.play(1,0.0)
+                        time.sleep(.02)
+                    else:
+                        self.draw_annotation_box(frame,rotation_vec,translation_vec)
                 else:
                     pygame.mixer.music.play(1,0.0)
                     time.sleep(.02)

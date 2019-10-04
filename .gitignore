@@ -1,5 +1,6 @@
 #Ignore .DS_Store
 *.DS_Store
 
-#Ignore weights file
+#Ignore weights files
 *.dat
+*.caffemodel
