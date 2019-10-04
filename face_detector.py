@@ -3,7 +3,12 @@ import dlib
 import numpy as np
 from imutils import face_utils
 import argparse
-import playsound 
+import pygame
+import time
+
+pygame.init()
+pygame.mixer.init()
+pygame.mixer.music.load('beep-07.mp3')
 
 parser = argparse.ArgumentParser(description="Pass video file")
 parser.add_argument("--video",dest="video",default="0",
@@ -14,6 +19,8 @@ class FaceDetector:
     def __init__(self):
         self.dist_coeffs = np.zeros((4,1))
         self.face_landmark_path = './shape_predictor_68_face_landmarks.dat'
+        self.eyes_area = []
+
     def _get_full_model_points(self,filename='assets/model.txt'):
             raw_value = []
             with open(filename) as file:
@@ -67,6 +74,31 @@ class FaceDetector:
                                                         self.dist_coeffs)
         return rotation_vec, translation_vec
 
+    def eyes_open(self,shape):
+        '''
+        Heuristic to determine if eyes are open based on a continuously
+        calculated average eye area
+        '''
+        eye_left = np.array([shape[36],shape[37],shape[38],
+                            shape[39],shape[40],shape[41]])
+        eye_right = np.array([shape[42],shape[43],shape[44],
+                            shape[45],shape[46],shape[47]])
+
+        left_area = self.shoelace_formula(eye_left)
+        right_area = self.shoelace_formula(eye_right)
+        self.eyes_area.append(left_area)
+        self.eyes_area.append(right_area)
+        if (left_area+right_area)/2 < (np.mean(self.eyes_area)/1.5):
+            return False
+        return True
+
+    def shoelace_formula(self,points):
+        '''Determine area of polygon from points'''
+        x = points[:,0]
+        y = points[:,1]
+        return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
+
+
     def detect(self):
         if args.video == '0':
             args.video = 0
@@ -89,7 +121,6 @@ class FaceDetector:
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor(self.face_landmark_path)
 
-        fps = 0
         while cap.isOpened():
             ret, frame = cap.read()
             frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
@@ -97,11 +128,18 @@ class FaceDetector:
                 face_rects = self.detector(frame, 0)
                 if len(face_rects) > 0:
                     shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
+                    print(self.eyes_open(shape))
+                    for i, item in enumerate(shape):
+                        if i >= 36 and i <= 47:
+                            cv2.circle(frame,tuple(item),1,(0,255,0),-1)
+                        else:
+                            cv2.circle(frame,tuple(item),1,(255,0,0),-1)
 
                     rotation_vec, translation_vec = self.get_head_pose(shape)
                     self.draw_annotation_box(frame,rotation_vec,translation_vec)
                 else:
-                    playsound.playsound('beep-07.mp3')
+                    pygame.mixer.music.play(1,0.0)
+                    time.sleep(.02)
                 cv2.imshow("Frame", frame)
                 if cv2.waitKey(1) == 27:
                     break
