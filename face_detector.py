@@ -9,10 +9,11 @@ import time
 class FaceDetector:
     def __init__(self):
         self.dist_coeffs = np.zeros((4,1))
-        self.face_landmark_path = '/home/clymer-hogan-inc/Desktop/DriverMonitor/shape_predictor_68_face_landmarks.dat'
+        self.face_landmark_path = 'shape_predictor_68_face_landmarks.dat'
         self.eyes_area = [] # Store area of eye feature
+        self.head_rotation = [] # Store head rotation information
 
-    def get_full_model_points(self,filename='/home/clymer-hogan-inc/Desktop/DriverMonitor/model.txt'):
+    def get_full_model_points(self,filename='model.txt'):
             raw_value = []
             with open(filename) as file:
                 for line in file:
@@ -70,6 +71,7 @@ class FaceDetector:
                 else:
                     cv2.circle(image,tuple(item),1,(255,0,0),-1)
 
+
     def get_head_pose(self,shape: np.array) -> tuple:
         # Find rotational and translational vectors of head position
         image_pts = np.float32([shape])
@@ -77,9 +79,10 @@ class FaceDetector:
                                                         image_pts,
                                                         self.camera_matrix,
                                                         self.dist_coeffs)
+
         return (rotation_vec, translation_vec)
 
-    def eyes_open(self,shape: np.array) -> bool:
+    def eyes_area_per_face_area(self,shape: np.array) -> bool:
         # Heuristic to determine if eyes are open based on a continuously
         # calculated average eye area controlled for head size (proxy for depth)
         eye_left = np.array([shape[36],shape[37],shape[38],
@@ -94,9 +97,7 @@ class FaceDetector:
         right_area = self.shoelace_formula(eye_right) / face_area
         self.eyes_area.append(left_area)
         self.eyes_area.append(right_area)
-        if (left_area+right_area)/2 < (np.mean(self.eyes_area)/1.5):
-            return False
-        return True
+        return (left_area+right_area)/2
 
     def shoelace_formula(self,points: np.array) -> float:
         # Determine area of polygon from points
@@ -127,47 +128,62 @@ class FaceDetector:
 
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor(self.face_landmark_path)
-        
-        inattentive_start = None
+
+        ALL_DATA = []
+        LABELS = []
+
+        # Matrix with shape 30 x 5 that stores past 30 frames where 3 features
+        # are 1. Face detected, 2-4. Head Rotation, 5. Eyes Area / Face Area
+        driver_state = np.full(shape=(30,5),fill_value=None)
+
         while cap.isOpened():
-            
+
             ret, frame = cap.read()
             # Resize frame for faster detection
             frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
             if not ret:
                 break
 
-            # Detect heads in frame
+            current_state = np.array([[0,0,0,0,0]])
+
+            # Detect face in frame
             face_rects = self.detector(frame, 0)
             if len(face_rects) > 0: # Head detected
-          
-         
+                # driver_state['Face'] = True
                 # Get head feature points from first detected head
                 shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
 
                 # Find position of head
                 rotation_vec, translation_vec = self.get_head_pose(shape)
-                if not self.eyes_open(shape): # Determine if eyes are closed
-                    # If eyes closed, draw red annotation box and play alert sound
-                    if inattentive_start is None:
-                        inattentive_start = time.time()
-                    elif time.time() - inattentive_start >= .8:
-                        self.draw_annotation_box(frame,shape,rotation_vec,translation_vec,color=(0,0,255))
-                        pygame.mixer.music.play(1,0.0)
-                        time.sleep(.02)
-                else:
-                    if inattentive_start is not None:
-                        inattentive_start = None
-                    # If eyes open, draw white annotation box
-                    self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
-            else: # No head detected
-                # Alert driver with sound 
-                if inattentive_start is None:
-                    inattentive_start = time.time()
-                elif time.time() - inattentive_start >= .8:
-                    pygame.mixer.music.play(1,0.0)
-                    time.sleep(.02)
+
+                # Check if eyes are open
+                eyes_area = self.eyes_area_per_face_area(shape)
+
+                # Draw facial features
+                self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
+
+                # Update current driver state
+                current_state = np.array([[1,
+                                        translation_vec[0],
+                                        translation_vec[1],
+                                        translation_vec[2],
+                                        eyes_area]])
+
+            # Update driver state feature vector
+            driver_state = np.concatenate((np.delete(driver_state,0,axis=0),
+                                            current_state),axis=0)
+
+            # Use heuristic of feature vector to determine if inattentive
+            if driver_state[0][0] != None and (
+                np.mean(driver_state[:,0]) < 0.5 or \
+                np.mean(driver_state[:,4]) < (np.mean(self.eyes_area) / 1.3) or \
+                False):
+                # Play alert sound
+                pygame.mixer.music.play(1,0.0)
+                time.sleep(.02)
+
             cv2.imshow("Frame", frame)
+
             if cv2.waitKey(1) == 27:
                 break
 
@@ -175,7 +191,7 @@ if __name__ == '__main__':
     # Load alert sound
     pygame.init()
     pygame.mixer.init()
-    pygame.mixer.music.load('/home/clymer-hogan-inc/Desktop/DriverMonitor/beep-07.mp3')
+    pygame.mixer.music.load('beep-07.mp3')
 
     # Take video argument, default to webcam
     parser = argparse.ArgumentParser(description="Pass video file")
