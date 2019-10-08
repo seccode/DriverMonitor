@@ -197,6 +197,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Pass video file")
     parser.add_argument("--video",dest="video",default="0",
                         help="Path to video file")
+    parser.add_argument("--show",dest="show",default=1,
+                        help="1 to show frame, 0 to not show frame")
     args = parser.parse_args()
 
     FaceDetector().detect()
