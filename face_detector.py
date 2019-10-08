@@ -129,20 +129,23 @@ class FaceDetector:
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor(self.face_landmark_path)
 
-        ALL_DATA = []
-        LABELS = []
-
         # Matrix with shape 30 x 5 that stores past 30 frames where 3 features
         # are 1. Face detected, 2-4. Head Rotation, 5. Eyes Area / Face Area
         driver_state = np.full(shape=(30,5),fill_value=None)
 
-        while cap.isOpened():
+        y_padding_bottom = 10
+        y_padding_top = 10
+        x_padding_left = 10
+        x_padding_right = 10
 
+        while cap.isOpened():
             ret, frame = cap.read()
-            # Resize frame for faster detection
-            frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
             if not ret:
                 break
+            # Resize frame for faster detection
+            frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
+            frame = frame[y_padding_top:frame.shape[1]-y_padding_top-y_padding_bottom,
+                        x_padding_left:frame.shape[0]-x_padding_left-x_padding_right]
 
             current_state = np.array([[0,0,0,0,0]])
 
