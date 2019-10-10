@@ -58,6 +58,7 @@ class FaceDetector:
 
             point_2d = np.int32(point_2d.reshape(-1, 2))
 
+            # If head is turned, color annotation box green
             if point_2d[0][0] < point_2d[5][0] or \
                 point_2d[0][1] < point_2d[5][1] or \
                 point_2d[2][0] > point_2d[7][0] or \
@@ -73,7 +74,7 @@ class FaceDetector:
             cv2.line(image, tuple(point_2d[3]), tuple(
                 point_2d[8]), color, line_width, cv2.LINE_AA)
 
-            # Add feature points to head
+            # Add feature points to frame
             for i, item in enumerate(shape):
                 if i >= 36 and i <= 47: # Eye feature points
                     cv2.circle(image,tuple(item),1,(0,255,0),-1)
@@ -87,7 +88,6 @@ class FaceDetector:
                                                         image_pts,
                                                         self.camera_matrix,
                                                         self.dist_coeffs)
-
         return (rotation_vec, translation_vec)
 
     def eyes_area_per_face_area(self,shape):
@@ -125,13 +125,12 @@ class FaceDetector:
             all_labels = np.concatenate((all_labels,np.load(l_file)))
         clf = SVC(gamma='auto')
         clf.fit(all_features,all_labels)
-        print()
+        print(f'Training Error: {clf.score(all_features,all_labels)}')
         return clf
 
     def detect(self):
         FEATURES = []
         LABELS = []
-
         # Read from video and detect head position
         if args.video == '0':
             args.video = 0
@@ -170,8 +169,7 @@ class FaceDetector:
             if not ret:
                 break
             # Resize frame for faster detection
-            # frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
-            frame = cv2.resize(frame,(int(frame.shape[1]/20),int(frame.shape[0]/20)))
+            frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
 
             # Crop frame
             # frame = frame[y_padding_top:frame.shape[1]-y_padding_top-y_padding_bottom,
@@ -208,6 +206,7 @@ class FaceDetector:
                 # 1 if inattentive
                 if (clf.predict(current_state.reshape(1,-1))[0] == 1):
                     # Play alert sound
+                    print("Inattentive")
                     pygame.mixer.music.play(1,0.0)
                     time.sleep(.02)
 
