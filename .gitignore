@@ -4,6 +4,3 @@
 #Ignore weights files
 *.dat
 *.caffemodel
-
-#Ignore feature and label data
-*data/
