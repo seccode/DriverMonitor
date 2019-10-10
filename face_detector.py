@@ -5,6 +5,8 @@ from imutils import face_utils
 import argparse
 import pygame
 import time
+from sklearn.svm import SVC
+import glob
 
 class FaceDetector:
     def __init__(self):
@@ -56,12 +58,10 @@ class FaceDetector:
 
             point_2d = np.int32(point_2d.reshape(-1, 2))
 
-            head_turned = False
             if point_2d[0][0] < point_2d[5][0] or \
                 point_2d[0][1] < point_2d[5][1] or \
                 point_2d[2][0] > point_2d[7][0] or \
                 point_2d[2][1] > point_2d[7][1]:
-                head_turned = True
                 color = (0,255,0)
 
             # Add lines to frame
@@ -79,8 +79,6 @@ class FaceDetector:
                     cv2.circle(image,tuple(item),1,(0,255,0),-1)
                 else:
                     cv2.circle(image,tuple(item),1,(255,0,0),-1)
-
-            return head_turned
 
     def get_head_pose(self,shape):
         # Find rotational and translational vectors of head position
@@ -115,7 +113,24 @@ class FaceDetector:
         y = points[:,1]
         return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
 
+    def train_svm(self):
+        # Train and return Support Vector Machine on available data
+        all_features = np.array([])
+        all_labels = np.array([])
+        feature_files = glob.glob('data/features_*')
+        label_files = glob.glob('data/labels_*')
+        assert len(feature_files) == 0, "No saved feature vectors"
+        for f_file, l_file in zip(feature_files,label_files):
+            all_features = np.append(all_features,np.load(f_file))
+            all_labels = np.append(all_labels,np.load(l_file))
+        clf = SVC(gamma='auto')
+        clf.fit(all_features,all_labels)
+        return clf
+
     def detect(self):
+        FEATURES = []
+        LABELS = []
+
         # Read from video and detect head position
         if args.video == '0':
             args.video = 0
@@ -136,18 +151,18 @@ class FaceDetector:
              [0, self.focal_length, self.camera_center[1]],
              [0, 0, 1]], dtype="double")
 
+        # Initiliaze dlib face predictor
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor(self.face_landmark_path)
 
-        # Matrix with shape 30 x 6 that stores past 30 frames where 3 features
-        # are 1. Face detected, 2. Eyes Area / Face Area, 3. Head Rotation Bool
-        # 4-6. Head Rotation,
-        driver_state = np.full(shape=(30,6),fill_value=None)
-
+        # Control cropping size
         y_padding_bottom = 10
         y_padding_top = 10
         x_padding_left = 10
         x_padding_right = 10
+
+        if args.predict:
+            clf = self.train_svm()
 
         while cap.isOpened():
             ret, frame = cap.read()
@@ -155,16 +170,19 @@ class FaceDetector:
                 break
             # Resize frame for faster detection
             frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
+
+            # Crop frame
             # frame = frame[y_padding_top:frame.shape[1]-y_padding_top-y_padding_bottom,
                         # x_padding_left:frame.shape[0]-x_padding_left-x_padding_right]
 
-            current_state = np.array([[0,0,0,0,0,0]])
+            # Feature vector that represents driver state
+            # [Eye Area, Trans Vec X, Trans Vec Y, Trans Vec Z]
+            current_state = np.array([[0,0,0,0]])
 
-            head_turned = False
             # Detect face in frame
             face_rects = self.detector(frame, 0)
             if len(face_rects) > 0: # Head detected
-                # driver_state['Face'] = True
+
                 # Get head feature points from first detected head
                 shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
 
@@ -175,31 +193,41 @@ class FaceDetector:
                 eyes_area = self.eyes_area_per_face_area(shape)
 
                 # Draw facial features
-                head_turned = self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
+                self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
 
                 # Update current driver state
-                current_state = np.append(np.array([1,eyes_area,(1 if head_turned else 0)]),translation_vec.flatten()).reshape(1,6)
+                current_state = np.append(np.array([eyes_area]),translation_vec.flatten()).reshape(1,4)
 
-            # Update driver state feature vector
-            driver_state = np.concatenate((np.delete(driver_state,0,axis=0),
-                                            current_state),axis=0)
+            if args.label:
+                FEATURES.append(current_state.flatten())
 
-            # Use heuristic of feature vector to determine if inattentive
-            if driver_state[0][0] != None and \
-                (
-                # (np.max(driver_state[-10:,0]) == 0) or \
-                # (np.mean(driver_state[:,1]) < (np.mean(self.eyes_area) / 2)) or \
-                (np.mean(driver_state[-10:,2]) > 0.9) or \
-                (False)
-                ):
-                # Play alert sound
-                pygame.mixer.music.play(1,0.0)
-                time.sleep(.02)
+            # Use SVM to determine if inattentive
+            if args.predict:
+                # 1 if inattentive
+                if (clf.predict(current_state.reshape(1,-1))[0] == 1):
+                    # Play alert sound
+                    pygame.mixer.music.play(1,0.0)
+                    time.sleep(.02)
 
             cv2.imshow("Frame", frame)
-
-            if cv2.waitKey(1) == 27:
+            key = cv2.waitKey(1)
+            if key == 27:
+                if args.label:
+                    LABELS.append(0)
                 break
+            elif key == ord('1'):
+                if args.label:
+                    LABELS.append(1)
+            else:
+                if args.label:
+                    LABELS.append(0)
+
+        if args.label:
+            # Save labeled instances to data file
+            index = len(glob.glob('data/features_*'))
+            np.save('data/features_'+str(index),FEATURES)
+            np.save('data/labels_'+str(index),LABELS)
+
 
 if __name__ == '__main__':
     # Load alert sound
@@ -213,6 +241,10 @@ if __name__ == '__main__':
                         help="Path to video file")
     parser.add_argument("--show",dest="show",default=1,
                         help="1 to show frame, 0 to not show frame")
+    parser.add_argument("--label",dest="label",default=0,
+                        help="1 to label video data")
+    parser.add_argument("--predict",dest="predict",default=0,
+                        help="1 to train SVM on given data and predict frames")
     args = parser.parse_args()
 
     FaceDetector().detect()
