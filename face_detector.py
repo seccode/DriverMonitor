@@ -23,10 +23,10 @@ class FaceDetector:
             model_points[:, 2] *= -1
             return model_points
 
-    def draw_annotation_box(self, image: np.array,
-                                shape: np.array,
-                                rotation_vector: np.array,
-                                translation_vector: np.array,
+    def draw_annotation_box(self, image,
+                                shape,
+                                rotation_vector,
+                                translation_vector,
                                 color=(255, 255, 255),
                                 line_width=2):
             # Draw 3D box on frame in front of head
@@ -53,7 +53,16 @@ class FaceDetector:
                                               translation_vector,
                                               self.camera_matrix,
                                               self.dist_coeffs)
+
             point_2d = np.int32(point_2d.reshape(-1, 2))
+
+            head_turned = False
+            if point_2d[0][0] < point_2d[5][0] or \
+                point_2d[0][1] < point_2d[5][1] or \
+                point_2d[2][0] > point_2d[7][0] or \
+                point_2d[2][1] > point_2d[7][1]:
+                head_turned = True
+                color = (0,255,0)
 
             # Add lines to frame
             cv2.polylines(image, [point_2d], True, color, line_width, cv2.LINE_AA)
@@ -71,8 +80,9 @@ class FaceDetector:
                 else:
                     cv2.circle(image,tuple(item),1,(255,0,0),-1)
 
+            return head_turned
 
-    def get_head_pose(self,shape: np.array) -> tuple:
+    def get_head_pose(self,shape):
         # Find rotational and translational vectors of head position
         image_pts = np.float32([shape])
         _, rotation_vec, translation_vec = cv2.solvePnP(self.model_points_68,
@@ -82,7 +92,7 @@ class FaceDetector:
 
         return (rotation_vec, translation_vec)
 
-    def eyes_area_per_face_area(self,shape: np.array) -> bool:
+    def eyes_area_per_face_area(self,shape):
         # Heuristic to determine if eyes are open based on a continuously
         # calculated average eye area controlled for head size (proxy for depth)
         eye_left = np.array([shape[36],shape[37],shape[38],
@@ -99,7 +109,7 @@ class FaceDetector:
         self.eyes_area.append(right_area)
         return (left_area+right_area)/2
 
-    def shoelace_formula(self,points: np.array) -> float:
+    def shoelace_formula(self,points):
         # Determine area of polygon from points
         x = points[:,0]
         y = points[:,1]
@@ -129,9 +139,10 @@ class FaceDetector:
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor(self.face_landmark_path)
 
-        # Matrix with shape 30 x 5 that stores past 30 frames where 3 features
-        # are 1. Face detected, 2-4. Head Rotation, 5. Eyes Area / Face Area
-        driver_state = np.full(shape=(30,5),fill_value=None)
+        # Matrix with shape 30 x 6 that stores past 30 frames where 3 features
+        # are 1. Face detected, 2. Eyes Area / Face Area, 3. Head Rotation Bool
+        # 4-6. Head Rotation,
+        driver_state = np.full(shape=(30,6),fill_value=None)
 
         y_padding_bottom = 10
         y_padding_top = 10
@@ -144,11 +155,12 @@ class FaceDetector:
                 break
             # Resize frame for faster detection
             frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
-            frame = frame[y_padding_top:frame.shape[1]-y_padding_top-y_padding_bottom,
-                        x_padding_left:frame.shape[0]-x_padding_left-x_padding_right]
+            # frame = frame[y_padding_top:frame.shape[1]-y_padding_top-y_padding_bottom,
+                        # x_padding_left:frame.shape[0]-x_padding_left-x_padding_right]
 
-            current_state = np.array([[0,0,0,0,0]])
+            current_state = np.array([[0,0,0,0,0,0]])
 
+            head_turned = False
             # Detect face in frame
             face_rects = self.detector(frame, 0)
             if len(face_rects) > 0: # Head detected
@@ -163,24 +175,23 @@ class FaceDetector:
                 eyes_area = self.eyes_area_per_face_area(shape)
 
                 # Draw facial features
-                self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
+                head_turned = self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
 
                 # Update current driver state
-                current_state = np.array([[1,
-                                        translation_vec[0],
-                                        translation_vec[1],
-                                        translation_vec[2],
-                                        eyes_area]])
+                current_state = np.append(np.array([1,eyes_area,(1 if head_turned else 0)]),translation_vec.flatten()).reshape(1,6)
 
             # Update driver state feature vector
             driver_state = np.concatenate((np.delete(driver_state,0,axis=0),
                                             current_state),axis=0)
 
             # Use heuristic of feature vector to determine if inattentive
-            if driver_state[0][0] != None and (
-                np.mean(driver_state[:,0]) < 0.5 or \
-                np.mean(driver_state[:,4]) < (np.mean(self.eyes_area) / 1.3) or \
-                False):
+            if driver_state[0][0] != None and \
+                (
+                # (np.max(driver_state[-10:,0]) == 0) or \
+                # (np.mean(driver_state[:,1]) < (np.mean(self.eyes_area) / 2)) or \
+                (np.mean(driver_state[-10:,2]) > 0.9) or \
+                (False)
+                ):
                 # Play alert sound
                 pygame.mixer.music.play(1,0.0)
                 time.sleep(.02)
