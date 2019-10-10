@@ -123,9 +123,10 @@ class FaceDetector:
         for f_file, l_file in zip(feature_files,label_files):
             all_features = np.concatenate((all_features,np.load(f_file)))
             all_labels = np.concatenate((all_labels,np.load(l_file)))
-        clf = SVC(gamma='auto')
+
+        clf = SVC(class_weight='balanced')
         clf.fit(all_features,all_labels)
-        print(f'Training Error: {clf.score(all_features,all_labels)}')
+        print('Training Error: {}'.format(clf.score(all_features,all_labels)))
         return clf
 
     def detect(self):
@@ -164,6 +165,10 @@ class FaceDetector:
         if args.predict:
             clf = self.train_svm()
 
+        # Driver state stores classifications of attentive/inattentive for
+        # past 30 frames
+        self.driver_state = np.zeros((30,))
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -196,7 +201,8 @@ class FaceDetector:
                 self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
 
                 # Update current driver state
-                current_state = np.append(np.array([eyes_area]),translation_vec.flatten()).reshape(1,4)
+                current_state = np.append(np.array([eyes_area]),
+                                        translation_vec.flatten()).reshape(1,4)
 
             if args.label:
                 FEATURES.append(current_state.flatten())
@@ -204,9 +210,12 @@ class FaceDetector:
             # Use SVM to determine if inattentive
             if args.predict:
                 # 1 if inattentive
-                if (clf.predict(current_state.reshape(1,-1))[0] == 1):
+                pred = clf.predict(current_state.reshape(1,-1))
+                # Update driver state vector
+                self.driver_state = np.append(np.delete(self.driver_state,0),pred)
+                if np.min(self.driver_state[-20:]) == 1: # Last 10 frames are inattentive
                     # Play alert sound
-                    print("Inattentive")
+                    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     pygame.mixer.music.play(1,0.0)
                     time.sleep(.02)
 
@@ -216,6 +225,9 @@ class FaceDetector:
                 if args.label:
                     LABELS.append(0)
                 break
+            elif np.max(current_state) == 0:
+                if args.label:
+                    LABELS.append(1)
             elif key == ord('1'):
                 if args.label:
                     LABELS.append(1)
@@ -236,7 +248,7 @@ if __name__ == '__main__':
     pygame.mixer.init()
     pygame.mixer.music.load('beep-07.mp3')
 
-    # Take video argument, default to webcam
+    # Parse arguments, default to webcam
     parser = argparse.ArgumentParser(description="Pass video file")
     parser.add_argument("--video",dest="video",default="0",
                         help="Path to video file")
@@ -248,4 +260,5 @@ if __name__ == '__main__':
                         help="1 to train SVM on given data and predict frames")
     args = parser.parse_args()
 
+    # Start detection
     FaceDetector().detect()
