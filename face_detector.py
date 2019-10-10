@@ -115,16 +115,17 @@ class FaceDetector:
 
     def train_svm(self):
         # Train and return Support Vector Machine on available data
-        all_features = np.array([])
-        all_labels = np.array([])
+        all_features = np.array([[0,0,0,0]])
+        all_labels = np.array([0])
         feature_files = glob.glob('data/features_*')
         label_files = glob.glob('data/labels_*')
-        assert len(feature_files) == 0, "No saved feature vectors"
+        assert len(feature_files) > 0, "No saved feature vectors"
         for f_file, l_file in zip(feature_files,label_files):
-            all_features = np.append(all_features,np.load(f_file))
-            all_labels = np.append(all_labels,np.load(l_file))
+            all_features = np.concatenate((all_features,np.load(f_file)))
+            all_labels = np.concatenate((all_labels,np.load(l_file)))
         clf = SVC(gamma='auto')
         clf.fit(all_features,all_labels)
+        print()
         return clf
 
     def detect(self):
@@ -169,7 +170,8 @@ class FaceDetector:
             if not ret:
                 break
             # Resize frame for faster detection
-            frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
+            # frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
+            frame = cv2.resize(frame,(int(frame.shape[1]/20),int(frame.shape[0]/20)))
 
             # Crop frame
             # frame = frame[y_padding_top:frame.shape[1]-y_padding_top-y_padding_bottom,
