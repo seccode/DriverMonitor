@@ -254,6 +254,11 @@ if __name__ == '__main__':
     # Load alert sound
     pygame.init()
     pygame.mixer.init()
+
+    pygame.mixer.music.load('start_up_sound.mp3')
+    pygame.mixer.music.play(1,0.0)
+    time.sleep(2.9)
+
     pygame.mixer.music.load('beep-07.mp3')
 
     # Parse arguments, default to webcam
@@ -263,7 +268,10 @@ if __name__ == '__main__':
     parser.add_argument("--show",dest="show",default=1,
                         help="1 to show frame, 0 to not show frame")
     parser.add_argument("--label",dest="label",default=0,
-                        help="1 to label video data")
+                        help="1 to label video data, labeling is done by \
+                        pressing the '1' key while video is played (or in real \
+                        time webcam) for inattentive, and the default class is \
+                        attentive if no key is pressed for a frame")
     parser.add_argument("--predict",dest="predict",default=0,
                         help="1 to train SVM on given data and predict frames")
     args = parser.parse_args()
