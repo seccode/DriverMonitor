@@ -7,6 +7,7 @@ import pygame
 import time
 from sklearn.svm import SVC
 import glob
+import math
 
 class FaceDetector:
     def __init__(self):
@@ -88,7 +89,13 @@ class FaceDetector:
                                                         image_pts,
                                                         self.camera_matrix,
                                                         self.dist_coeffs)
-        return (rotation_vec, translation_vec)
+
+        rvec_matrix = cv2.Rodrigues(rotation_vec)[0]
+        proj_matrix = np.hstack((rvec_matrix, translation_vec))
+        eulerAngles = cv2.decomposeProjectionMatrix(proj_matrix)[6]
+        # pitch_roll_yaw = [math.radians(_) for _ in eulerAngles]
+
+        return (rotation_vec, translation_vec, eulerAngles)
 
     def eyes_area_per_face_area(self,shape):
         # Heuristic to determine if eyes are open based on a continuously
@@ -155,13 +162,8 @@ class FaceDetector:
         self.detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor(self.face_landmark_path)
 
-        # Control cropping size
-        y_padding_bottom = 10
-        y_padding_top = 10
-        x_padding_left = 10
-        x_padding_right = 10
-
         if args.predict:
+            # Train SVM
             clf = self.train_svm()
 
         # Driver state stores classifications of attentive/inattentive for
@@ -170,16 +172,11 @@ class FaceDetector:
 
         self.count = 0
         while cap.isOpened():
-            self.count += 1
             ret, frame = cap.read()
             if not ret:
                 break
             # Resize frame for faster detection
             frame = cv2.resize(frame,(int(frame.shape[1]/2),int(frame.shape[0]/2)))
-
-            # Crop frame
-            # frame = frame[y_padding_top:frame.shape[1]-y_padding_top-y_padding_bottom,
-                        # x_padding_left:frame.shape[0]-x_padding_left-x_padding_right]
 
             # Feature vector that represents driver state
             # [Eye Area, Trans Vec X, Trans Vec Y, Trans Vec Z]
@@ -193,11 +190,12 @@ class FaceDetector:
                 shape = face_utils.shape_to_np(self.predictor(frame, face_rects[0]))
 
                 # Find position of head
-                rotation_vec, translation_vec = self.get_head_pose(shape)
+                rotation_vec, translation_vec, eulerAngles = self.get_head_pose(shape)
 
-                for x in range(3): # X, Y, Z of translational vector
-                    self.head_rotation[x] = ((self.head_rotation[x] * self.count) + translation_vec[0]) / (self.count + 1)
-
+                self.count += 1
+                for x in range(3): # Euler Angles
+                    self.head_rotation[x] += (eulerAngles[x] - self.head_rotation[x]) / self.count
+                # print(self.head_rotation)
 
                 # Check if eyes are open
                 eyes_area = self.eyes_area_per_face_area(shape)
@@ -206,13 +204,14 @@ class FaceDetector:
                 self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
 
                 # Create translational vector adjusted for rolling average
-                controlled_translational_vec = translation_vec.flatten() - self.head_rotation
+                controlled_translational_vec = eulerAngles.flatten() - self.head_rotation
 
                 # Update current driver state
                 current_state = np.append(np.array([eyes_area]),
                                         controlled_translational_vec).reshape(1,4)
 
-                print(self.driver_state.reshape(5,6))
+            # print(self.driver_state.reshape(5,6))
+
             if args.label:
                 FEATURES.append(current_state.flatten())
 
