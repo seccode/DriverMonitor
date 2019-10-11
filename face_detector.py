@@ -12,8 +12,8 @@ class FaceDetector:
     def __init__(self):
         self.dist_coeffs = np.zeros((4,1))
         self.face_landmark_path = 'shape_predictor_68_face_landmarks.dat'
-        self.eyes_area = [] # Store area of eye feature
-        self.head_rotation = [] # Store head rotation information
+        self.eyes_area = 0 # Store area of eye feature
+        self.head_rotation = np.zeros((3,)) # (3,) Store head rotation information
 
     def get_full_model_points(self,filename='model.txt'):
             raw_value = []
@@ -103,8 +103,7 @@ class FaceDetector:
 
         left_area = self.shoelace_formula(eye_left) / face_area
         right_area = self.shoelace_formula(eye_right) / face_area
-        self.eyes_area.append(left_area)
-        self.eyes_area.append(right_area)
+        self.eyes_area = ((self.eyes_area * self.count) + (left_area+right_area)/2) / (self.count + 1)
         return (left_area+right_area)/2
 
     def shoelace_formula(self,points):
@@ -169,7 +168,9 @@ class FaceDetector:
         # past 30 frames
         self.driver_state = np.zeros((30,))
 
+        self.count = 0
         while cap.isOpened():
+            self.count += 1
             ret, frame = cap.read()
             if not ret:
                 break
@@ -194,16 +195,24 @@ class FaceDetector:
                 # Find position of head
                 rotation_vec, translation_vec = self.get_head_pose(shape)
 
+                for x in range(3): # X, Y, Z of translational vector
+                    self.head_rotation[x] = ((self.head_rotation[x] * self.count) + translation_vec[0]) / (self.count + 1)
+
+
                 # Check if eyes are open
                 eyes_area = self.eyes_area_per_face_area(shape)
 
                 # Draw facial features
                 self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
 
+                # Create translational vector adjusted for rolling average
+                controlled_translational_vec = translation_vec.flatten() - self.head_rotation
+
                 # Update current driver state
                 current_state = np.append(np.array([eyes_area]),
-                                        translation_vec.flatten()).reshape(1,4)
+                                        controlled_translational_vec).reshape(1,4)
 
+                print(self.driver_state.reshape(5,6))
             if args.label:
                 FEATURES.append(current_state.flatten())
 
@@ -215,7 +224,7 @@ class FaceDetector:
                 self.driver_state = np.append(np.delete(self.driver_state,0),pred)
                 if np.min(self.driver_state[-20:]) == 1: # Last 10 frames are inattentive
                     # Play alert sound
-                    # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     pygame.mixer.music.play(1,0.0)
                     time.sleep(.02)
 
