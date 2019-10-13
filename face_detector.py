@@ -59,12 +59,14 @@ class FaceDetector:
 
             point_2d = np.int32(point_2d.reshape(-1, 2))
 
+            head_turned = False
             # If head is turned, color annotation box green
             if point_2d[0][0] < point_2d[5][0] or \
                 point_2d[0][1] < point_2d[5][1] or \
                 point_2d[2][0] > point_2d[7][0] or \
                 point_2d[2][1] > point_2d[7][1]:
                 color = (0,255,0)
+                head_turned = True
 
             # Add lines to frame
             cv2.polylines(image, [point_2d], True, color, line_width, cv2.LINE_AA)
@@ -81,6 +83,7 @@ class FaceDetector:
                     cv2.circle(image,tuple(item),1,(0,255,0),-1)
                 else:
                     cv2.circle(image,tuple(item),1,(255,0,0),-1)
+            return head_turned
 
     def get_head_pose(self,shape):
         # Find rotational and translational vectors of head position
@@ -184,6 +187,9 @@ class FaceDetector:
 
             # Detect face in frame
             face_rects = self.detector(frame, 0)
+
+            head_turned = True
+            eyes_area = 0
             if len(face_rects) > 0: # Head detected
 
                 # Get head feature points from first detected head
@@ -201,7 +207,7 @@ class FaceDetector:
                 eyes_area = self.eyes_area_per_face_area(shape)
 
                 # Draw facial features
-                self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
+                head_turned = self.draw_annotation_box(frame,shape,rotation_vec,translation_vec)
 
                 # Create translational vector adjusted for rolling average
                 controlled_translational_vec = eulerAngles.flatten() - self.head_rotation
@@ -210,15 +216,21 @@ class FaceDetector:
                 current_state = np.append(np.array([eyes_area]),
                                         controlled_translational_vec).reshape(1,4)
 
-            # print(self.driver_state.reshape(5,6))
+            print(self.driver_state.reshape(5,6))
 
             if args.label:
                 FEATURES.append(current_state.flatten())
 
             # Use SVM to determine if inattentive
-            if args.predict:
-                # 1 if inattentive
-                pred = clf.predict(current_state.reshape(1,-1))
+            if args.predict or args.simple_predict:
+                if args.predict:
+                    # 1 if inattentive
+                    pred = clf.predict(current_state.reshape(1,-1))
+                else:
+                    pred = np.array([0])
+                    if head_turned or eyes_area < (self.eyes_area / 1.5):
+                        pred[0] = 1
+
                 # Update driver state vector
                 self.driver_state = np.append(np.delete(self.driver_state,0),pred)
                 if np.min(self.driver_state[-20:]) == 1: # Last 10 frames are inattentive
@@ -226,6 +238,7 @@ class FaceDetector:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     pygame.mixer.music.play(1,0.0)
                     time.sleep(.02)
+
 
             cv2.imshow("Frame", frame)
             key = cv2.waitKey(1)
@@ -251,15 +264,6 @@ class FaceDetector:
 
 
 if __name__ == '__main__':
-    # Load alert sound
-    pygame.init()
-    pygame.mixer.init()
-
-    pygame.mixer.music.load('start_up_sound.mp3')
-    pygame.mixer.music.play(1,0.0)
-    time.sleep(2.9)
-
-    pygame.mixer.music.load('beep-07.mp3')
 
     # Parse arguments, default to webcam
     parser = argparse.ArgumentParser(description="Pass video file")
@@ -274,7 +278,21 @@ if __name__ == '__main__':
                         attentive if no key is pressed for a frame")
     parser.add_argument("--predict",dest="predict",default=0,
                         help="1 to train SVM on given data and predict frames")
+    parser.add_argument("--simple_predict",dest="simple_predict",default=0,
+                        help="1 to predict inattentiveness based on thresholding")
+    parser.add_argument("--start_sound",dest="start_sound",default=0,
+                        help="1 to play start up sound")
     args = parser.parse_args()
+
+
+    # Load alert sound
+    pygame.init()
+    pygame.mixer.init()
+    if args.start_sound:
+        pygame.mixer.music.load('start_up_sound.mp3')
+        pygame.mixer.music.play(1,0.0)
+        time.sleep(2.9)
+    pygame.mixer.music.load('beep-07.mp3')
 
     # Start detection
     FaceDetector().detect()
